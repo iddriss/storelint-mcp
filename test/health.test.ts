@@ -24,7 +24,7 @@ describe("http basics", () => {
     assert.match(html, /storelint_checks/);
     assert.match(html, /\$0\.05/);
     assert.match(html, /https:\/\/example\.test\/mcp/);
-    assert.match(html, /https:\/\/storelint\.iraaj\.com/);
+    assert.match(html, /https:\/\/storelint\.embracetech\.org/);
   });
 
   it("GET /mcp is rejected: the server is stateless", async () => {

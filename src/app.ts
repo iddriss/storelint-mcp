@@ -48,7 +48,7 @@ export function createApp(cfg: AppConfig, overrides: AppOverrides = {}): Hono {
     return c.html(
       landingPage({
         mcpUrl: `${origin}/mcp`,
-        priceLabel: `${cfg.price} USDC`,
+        price: cfg.price,
         paymentsEnabled: Boolean(cfg.payTo),
         network: cfg.network,
         payTo: cfg.payTo,
