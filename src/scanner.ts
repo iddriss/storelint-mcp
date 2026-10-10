@@ -117,7 +117,7 @@ export async function stubReport(dir: string): Promise<Report> {
       detail:
         "The StoreLint scanner package is not installed on this server, so no checks were run. Project detection still ran.",
       fix: "Install the `storelint` package on the server (dependency github:iddriss/storelint) and redeploy.",
-      docs: "https://storelint.iraaj.com",
+      docs: "https://storelint.embracetech.org",
     },
   ];
   return {

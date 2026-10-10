@@ -39,7 +39,7 @@ export function landingPage(info: LandingInfo): string {
 </head>
 <body>
 <h1>StoreLint MCP</h1>
-<p>An <a href="https://modelcontextprotocol.io/">MCP</a> server that lets AI agents run <a href="https://storelint.iraaj.com">StoreLint</a>:
+<p>An <a href="https://modelcontextprotocol.io/">MCP</a> server that lets AI agents run <a href="https://storelint.embracetech.org">StoreLint</a>:
 a scanner that finds everything that would get a Flutter, React Native or Expo app rejected or blocked on Google Play and the Apple App Store.</p>
 
 <h2>Endpoint</h2>
@@ -62,7 +62,7 @@ ${checkRows}
 </tbody>
 </table>
 
-<p>Free CLI and web scans, plus the done-for-you release service: <a href="https://storelint.iraaj.com">storelint.iraaj.com</a>.</p>
+<p>Free CLI and web scans, plus the done-for-you release service: <a href="https://storelint.embracetech.org">storelint.embracetech.org</a>.</p>
 </body>
 </html>
 `;

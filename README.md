@@ -1,6 +1,6 @@
 # storelint-mcp
 
-MCP server that exposes the [StoreLint](https://storelint.iraaj.com) scanner (Google Play / App Store
+MCP server that exposes the [StoreLint](https://storelint.embracetech.org) scanner (Google Play / App Store
 readiness checks for Flutter, React Native and Expo apps) as a tool that AI agents pay for per call with
 [x402](https://www.x402.org/) (USDC on Base).
 
