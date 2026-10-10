@@ -1,17 +1,34 @@
 /**
- * x402 Bazaar discovery metadata for the paid HTTP endpoint `POST /x402/scan`.
+ * x402 Bazaar discovery metadata for both paid routes: the MCP tool `storelint_scan` on
+ * `POST /mcp` (Bazaar resource type "mcp") and its plain HTTP twin `POST /x402/scan` (type "http").
  *
  * The CDP facilitator indexes a resource after it settles a payment whose 402 challenge carried
  * `extensions.bazaar` (docs/RESEARCH.md, "Discovery / Bazaar"). `declareDiscoveryExtension`
  * (@x402/extensions/bazaar) builds that block; `@x402/hono` registers the server extension on its
- * own when a route declares it. The facilitator validates `info.input` against `schema`, so the
- * example body below must satisfy SCAN_INPUT_SCHEMA and the example report SCAN_OUTPUT_SCHEMA.
+ * own when a route declares it. The facilitator validates `info` against `schema`, so the example
+ * input below must satisfy SCAN_INPUT_SCHEMA and the example report SCAN_OUTPUT_SCHEMA.
  */
 import { declareDiscoveryExtension } from "@x402/extensions/bazaar";
+import { SCAN_TOOL } from "./mcp.js";
 import type { Report } from "./scanner.js";
 
 /** Plain HTTP twin of the `storelint_scan` MCP tool; same input, same Report, same price. */
 export const SCAN_HTTP_PATH = "/x402/scan";
+
+/**
+ * Route description for `POST /mcp` (the 402's `resource.description`). Under the CDP facilitator's
+ * 500-character limit; natural language, since the Bazaar scores bare names as zero.
+ */
+export const SCAN_MCP_DESCRIPTION =
+  `StoreLint MCP server (Streamable HTTP). Paid tool ${SCAN_TOOL}: checks a Flutter, React Native or Expo project ` +
+  "for Google Play and App Store rejection risks (target SDK, 16 KB page size, privacy manifest, usage descriptions, " +
+  "debug signing, leaked secrets, placeholder ids, icons) and returns a Report JSON with a score and findings " +
+  "(severity, file, fix). Arguments: exactly one of repoUrl (public GitHub repo) or zipBase64 (base64 zip, " +
+  "max 50 MB). tools/list and storelint_checks are free.";
+
+/** Bazaar `serviceName` (printable ASCII, max 32) and `tags` (max 5) shared by both paid routes. */
+export const SERVICE_NAME = "StoreLint";
+export const SERVICE_TAGS = ["mobile", "app-store", "google-play", "flutter", "react-native"];
 
 /** Kept under the CDP facilitator's 500-character limit for route descriptions. */
 export const SCAN_HTTP_DESCRIPTION =
@@ -125,6 +142,26 @@ export function scanDiscoveryExtension(): Record<string, unknown> {
     bodyType: "json",
     input: SCAN_INPUT_EXAMPLE,
     inputSchema: SCAN_INPUT_SCHEMA as unknown as Record<string, unknown>,
+    output: {
+      example: SCAN_OUTPUT_EXAMPLE,
+      schema: SCAN_OUTPUT_SCHEMA as unknown as Record<string, unknown>,
+    },
+  });
+}
+
+/**
+ * `extensions` value for the `POST /mcp` route config: the Bazaar "mcp" resource type, catalogued by
+ * (resource.url, toolName). `inputSchema` is the tool's `tools/call` arguments schema (repoUrl or
+ * zipBase64), `example` a valid arguments object, `output` the Report. The server extension passes
+ * MCP declarations through unchanged (no HTTP method is added).
+ */
+export function mcpDiscoveryExtension(): Record<string, unknown> {
+  return declareDiscoveryExtension({
+    toolName: SCAN_TOOL,
+    description: SCAN_MCP_DESCRIPTION,
+    transport: "streamable-http",
+    inputSchema: SCAN_INPUT_SCHEMA as unknown as Record<string, unknown>,
+    example: SCAN_INPUT_EXAMPLE,
     output: {
       example: SCAN_OUTPUT_EXAMPLE,
       schema: SCAN_OUTPUT_SCHEMA as unknown as Record<string, unknown>,

@@ -153,10 +153,15 @@ describe("POST /x402/scan (paid mode, mock facilitator)", () => {
     assert.equal(challenge.extensions?.bazaar?.info.input.method, "POST");
   });
 
+  it("returns 402 for a `{}` probe (CDP's validator POSTs an empty JSON object)", async () => {
+    const res = await postScan(app.url, "{}");
+    assert.equal(res.status, 402);
+    assert.ok(decodeChallenge(res).accepts?.length);
+  });
+
   it("rejects bad input with 4xx before any 402", async () => {
     const cases: Array<[string, number]> = [
       ["not json", 400],
-      ["{}", 400],
       [JSON.stringify({ repoUrl: "https://evil.example/o/r" }), 400],
       [JSON.stringify({ repoUrl: "https://github.com/a/b", zipBase64: "QUJDRA==" }), 400],
       [JSON.stringify({ zipBase64: buildZip([{ name: "app/link", data: "/etc/passwd", symlink: true }]).toString("base64") }), 400],
@@ -170,7 +175,7 @@ describe("POST /x402/scan (paid mode, mock facilitator)", () => {
     assert.equal(scans, 0);
   });
 
-  it("keeps the MCP challenge on its public URL as well", async () => {
+  it("keeps the MCP challenge on its public URL with its own (mcp-type) Bazaar block", async () => {
     const res = await fetch(`${app.url}/mcp`, {
       method: "POST",
       headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
@@ -179,6 +184,7 @@ describe("POST /x402/scan (paid mode, mock facilitator)", () => {
     assert.equal(res.status, 402);
     const challenge = decodeChallenge(res);
     assert.equal(challenge.resource.url, `${PUBLIC_URL}/mcp`);
-    assert.equal(challenge.extensions?.bazaar, undefined);
+    assert.equal(challenge.extensions?.bazaar?.info.input.type, "mcp");
+    assert.equal(challenge.extensions?.bazaar?.info.input.toolName, "storelint_scan");
   });
 });

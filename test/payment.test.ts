@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
+import { validateDiscoveryExtension, validateDiscoveryExtensionSpec, type DiscoveryExtension } from "@x402/extensions/bazaar";
+import { mcpDiscoveryExtension, SCAN_MCP_DESCRIPTION, SERVICE_NAME, SERVICE_TAGS } from "../src/discovery.js";
 import { isPaidToolCall } from "../src/payment.js";
 import { buildZip, flutterFixtureZip, postJsonRpc, startApp, startMockFacilitator, testConfig, type Running } from "./helpers.js";
 
@@ -49,6 +51,66 @@ describe("x402 payment gate", () => {
     assert.equal(scans, 0, "scanner ran without payment");
     // only the startup /supported sync hit the facilitator; no verify/settle without a payment header
     assert.ok(facilitator.calls.includes("GET /supported"));
+    assert.ok(!facilitator.calls.some((c) => /verify|settle/.test(c)));
+  });
+
+  it("402 challenge carries Bazaar discovery metadata for the storelint_scan tool (mcp type)", async () => {
+    const res = await postJsonRpc(app.url, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "storelint_scan", arguments: { repoUrl: "https://github.com/acme/my_app" } },
+    });
+    assert.equal(res.status, 402);
+    const header = res.headers.get("payment-required");
+    assert.ok(header, "PAYMENT-REQUIRED header missing");
+    const challenge = JSON.parse(Buffer.from(header, "base64").toString("utf8")) as {
+      resource: { url: string; description?: string; mimeType?: string; serviceName?: string; tags?: string[] };
+      extensions?: {
+        bazaar?: {
+          info: {
+            input: { type: string; toolName: string; description?: string; transport?: string; inputSchema: { properties: Record<string, unknown>; oneOf: unknown[] }; example?: Record<string, unknown> };
+            output?: { type: string; example: { schemaVersion: number; findings: unknown[] } };
+          };
+          schema: { $schema: string; properties: { input: { required: string[]; properties: Record<string, unknown> }; output?: { properties: { example: { properties: Record<string, unknown> } } } } };
+        };
+      };
+    };
+
+    // resource metadata the Bazaar ranks on
+    assert.equal(challenge.resource.description, SCAN_MCP_DESCRIPTION);
+    assert.ok((challenge.resource.description ?? "").length <= 500, "description over the facilitator's 500-char limit");
+    assert.equal(challenge.resource.mimeType, "application/json");
+    assert.equal(challenge.resource.serviceName, SERVICE_NAME);
+    assert.deepEqual(challenge.resource.tags, SERVICE_TAGS);
+
+    // discovery block: mcp type, catalogued by (resource.url, toolName)
+    const bazaar = challenge.extensions?.bazaar;
+    assert.ok(bazaar, "extensions.bazaar missing from the challenge");
+    assert.equal(bazaar.info.input.type, "mcp");
+    assert.equal(bazaar.info.input.toolName, "storelint_scan");
+    assert.equal(bazaar.info.input.transport, "streamable-http");
+    assert.equal(typeof bazaar.info.input.description, "string");
+    assert.ok("repoUrl" in bazaar.info.input.inputSchema.properties);
+    assert.ok("zipBase64" in bazaar.info.input.inputSchema.properties);
+    assert.equal(bazaar.info.input.inputSchema.oneOf.length, 2);
+    assert.deepEqual(bazaar.info.input.example, { repoUrl: "https://github.com/acme/my_app" });
+    assert.equal(bazaar.info.output?.type, "json");
+    assert.equal(bazaar.info.output?.example.schemaVersion, 1);
+    assert.ok(Array.isArray(bazaar.info.output?.example.findings));
+    assert.equal(bazaar.schema.$schema, "https://json-schema.org/draft/2020-12/schema");
+    assert.deepEqual(bazaar.schema.properties.input.required, ["type", "toolName", "inputSchema"]);
+    assert.ok("summary" in (bazaar.schema.properties.output?.properties.example.properties ?? {}), "Report schema missing from output schema");
+    // no HTTP method is injected into an mcp-type declaration
+    assert.ok(!("method" in bazaar.info.input));
+
+    // what the facilitator checks before indexing: info validates against schema, plus the spec rules
+    assert.deepEqual(validateDiscoveryExtension(bazaar as unknown as DiscoveryExtension), { valid: true });
+    assert.deepEqual(validateDiscoveryExtensionSpec(bazaar as unknown as Record<string, unknown>), { valid: true });
+    // and the declaration served is the one built from discovery.ts
+    assert.deepEqual(bazaar, mcpDiscoveryExtension().bazaar);
+
+    assert.equal(scans, 0, "scanner ran without payment");
     assert.ok(!facilitator.calls.some((c) => /verify|settle/.test(c)));
   });
 

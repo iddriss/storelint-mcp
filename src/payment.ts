@@ -4,7 +4,15 @@ import { HTTPFacilitatorClient, type FacilitatorConfig, type RoutesConfig } from
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { createFacilitatorConfig } from "@coinbase/x402";
 import { DEFAULT_FACILITATOR_URL, type AppConfig } from "./config.js";
-import { SCAN_HTTP_DESCRIPTION, SCAN_HTTP_PATH, scanDiscoveryExtension } from "./discovery.js";
+import {
+  mcpDiscoveryExtension,
+  SCAN_HTTP_DESCRIPTION,
+  SCAN_HTTP_PATH,
+  SCAN_MCP_DESCRIPTION,
+  scanDiscoveryExtension,
+  SERVICE_NAME,
+  SERVICE_TAGS,
+} from "./discovery.js";
 import { validateScanInput, type InputLimits } from "./inputs.js";
 import { SCAN_TOOL } from "./mcp.js";
 import { readScanBody } from "./scanRoute.js";
@@ -47,28 +55,28 @@ export function buildFacilitatorConfig(cfg: AppConfig): FacilitatorConfig {
 }
 
 /**
- * Route table handed to `@x402/hono`. Both paid routes share price, network and pay-to.
+ * Route table handed to `@x402/hono`. Both paid routes share price, network, pay-to and service metadata.
  *
  * `resource` pins the URL advertised in the 402 (and indexed by the Bazaar) to PUBLIC_URL; without
  * it the middleware uses the request URL, which behind a reverse proxy is the internal http:// one.
- * Only the HTTP route declares Bazaar metadata: the Bazaar's "mcp" resource type is for the x402 MCP
- * transport (`_meta["x402/payment"]`), not for an HTTP 402 on a JSON-RPC endpoint.
+ * Both routes declare Bazaar metadata: `/mcp` as the Bazaar "mcp" resource type (toolName + the
+ * tool's arguments schema, catalogued per tool), `/x402/scan` as an "http" resource (POST, JSON body).
  */
 export function buildRoutes(cfg: AppConfig): RoutesConfig {
   const accepts = [{ scheme: "exact", price: cfg.price, network: cfg.network as Network, payTo: cfg.payTo as string }];
   const publicResource = (path: string) => (cfg.publicUrl ? `${cfg.publicUrl}${path}` : undefined);
+  const shared = { accepts, mimeType: "application/json", serviceName: SERVICE_NAME, tags: SERVICE_TAGS };
   return {
     [`POST ${MCP_PATH}`]: {
-      accepts,
+      ...shared,
       resource: publicResource(MCP_PATH),
-      description: `StoreLint scan (MCP tool ${SCAN_TOOL})`,
-      mimeType: "application/json",
+      description: SCAN_MCP_DESCRIPTION,
+      extensions: mcpDiscoveryExtension(),
     },
     [`POST ${SCAN_HTTP_PATH}`]: {
-      accepts,
+      ...shared,
       resource: publicResource(SCAN_HTTP_PATH),
       description: SCAN_HTTP_DESCRIPTION,
-      mimeType: "application/json",
       extensions: scanDiscoveryExtension(),
     },
   };

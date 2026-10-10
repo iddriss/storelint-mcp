@@ -8,7 +8,7 @@ import { InputError, validateScanInput, type InputLimits, type ScanInput } from 
 import type { Report } from "./scanner.js";
 
 export type ScanBody =
-  /** No body at all: discovery probes and validators POST without one and expect the 402 challenge. */
+  /** No body, or a JSON object naming neither input: discovery probes expect the 402 challenge. */
   | { kind: "empty" }
   | { kind: "invalid"; status: 400 | 413; error: string }
   | { kind: "input"; input: ScanInput };
@@ -32,6 +32,11 @@ export async function readScanBody(req: Request, limits: InputLimits, maxBodyByt
     body = JSON.parse(text);
   } catch {
     return { kind: "invalid", status: 400, error: "body must be a JSON object with repoUrl or zipBase64" };
+  }
+  // A JSON object that names neither input (e.g. `{}`) is a discovery probe: CDP's validator and the
+  // Bazaar indexer POST it and expect the 402 challenge, not a 400.
+  if (body && typeof body === "object" && !Array.isArray(body) && !("repoUrl" in body) && !("zipBase64" in body)) {
+    return { kind: "empty" };
   }
   const invalid = await validateScanInput(body, limits);
   if (invalid) return { kind: "invalid", status: 400, error: invalid };
