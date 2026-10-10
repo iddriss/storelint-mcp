@@ -13,6 +13,8 @@ export const REPO_URL = "https://github.com/iddriss/storelint-mcp";
 export interface LandingInfo {
   /** Absolute MCP endpoint, e.g. https://storelint-mcp.embracetech.org/mcp */
   mcpUrl: string;
+  /** Absolute plain-HTTP scan endpoint, e.g. https://storelint-mcp.embracetech.org/x402/scan */
+  scanHttpUrl: string;
   /** Configured price per storelint_scan call, e.g. "$0.05". */
   price: string;
   /** False when no pay-to address is configured (free mode). */
@@ -303,7 +305,7 @@ export function landingPage(info: LandingInfo): string {
     <div class="section-head">
       <span class="eyebrow">Tools</span>
       <h2>Two tools. One of them is free.</h2>
-      <p class="lead">Stateless Streamable HTTP, JSON responses, no sessions. <code>initialize</code> and <code>tools/list</code> are always free.</p>
+      <p class="lead">Stateless Streamable HTTP, JSON responses, no sessions. <code>initialize</code> and <code>tools/list</code> are always free. The paid scan is also a plain HTTP endpoint, below.</p>
     </div>
     <div class="grid grid-2">
       <div class="card">
@@ -320,6 +322,12 @@ export function landingPage(info: LandingInfo): string {
           <li>Score is 100 minus 25 per blocker and 5 per warning.</li>
         </ul>
       </div>
+    </div>
+    <div class="endpoint" id="http">
+      <div class="cmd"><code>POST ${esc(info.scanHttpUrl)}</code><button type="button" class="btn btn-secondary btn-sm" data-copy="${esc(info.scanHttpUrl)}">Copy</button></div>
+      <div class="endpoint-meta"><span class="badge">${esc(info.price)} per call</span><span class="endpoint-meta-item">Not on MCP? The same scan is a plain x402 HTTP resource: POST <code>{"repoUrl": "..."}</code> or <code>{"zipBase64": "..."}</code> and get the Report JSON back. It carries Bazaar discovery metadata, so Coinbase agents can find it with <code>coinbase_x402_resources</code> and pay for it with <code>coinbase_x402_fetch</code>${
+        info.paymentsEnabled ? "" : " once payments are switched on"
+      }.</span></div>
     </div>
   </div>
 </section>
@@ -344,6 +352,7 @@ export function landingPage(info: LandingInfo): string {
         <h3>Claude Desktop and paying clients</h3>
         <p>Claude Desktop adds remote servers from Settings &rarr; Connectors &rarr; Add custom connector, with the endpoint URL.</p>
         <p style="margin-top:12px">Free calls work from any client. To pay for <code>${SCAN_TOOL}</code>, wrap the MCP transport&rsquo;s <code>fetch</code> with an x402 client such as <code>@x402/fetch</code> holding a wallet with USDC on ${esc(network)}. It reads the 402 challenge, signs the transfer authorization and retries on its own.</p>
+        <p style="margin-top:12px">Paying from a Coinbase account instead? Add the Coinbase MCP (<code>claude mcp add coinbase --transport http https://agents.coinbase.com/mcp</code>) and call <code>coinbase_x402_fetch</code> with <a class="inline" href="#http">the HTTP endpoint</a> as the resource.</p>
       </div>
     </div>
   </div>

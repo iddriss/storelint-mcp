@@ -78,3 +78,107 @@ Sources:
 body and only invokes the x402 middleware when it is a `tools/call` of `storelint_scan` with syntactically valid
 arguments. The 402 is therefore a real HTTP-level x402 challenge (what `@x402/fetch` or any x402 client expects),
 and MCP clients pay by wrapping the transport's `fetch`.
+
+## 2026-10-10: discovery (Bazaar) and Coinbase for Agents
+
+Checked on 2026-10-10 against the official CDP docs (read first, per the owner), the installed
+`@x402/*@2.28.0` sources, and the x402 extension spec. No accounts, keys or payments were used; the
+discovery endpoints below are documented as unauthenticated but were not called.
+
+### How discovery works
+
+- The index is the **x402 Bazaar**, run by the CDP facilitator. Public read APIs (no CDP key):
+  `GET https://api.cdp.coinbase.com/platform/v2/x402/discovery/resources?type=http|mcp&limit&offset`,
+  `GET .../v2/x402/discovery/search?query&network&payTo&urlSubstring&maxUsdPrice&tags&curatedOnly&limit(<=20)`,
+  a merchant listing by `payTo`, and an MCP server at `https://api.cdp.coinbase.com/platform/v2/x402/discovery/mcp`
+  (tools `search_resources`, `proxy_tool_call`, `validate_endpoint`). Items carry `resource`, `type`
+  (`http` or `mcp`), `x402Version`, `accepts[]`, `description`, `extensions.bazaar`, `serviceName`,
+  `tags`, `quality` (30-day calls, unique payers, last call), `curated`.
+- **Getting listed** (seller "Get discovered" page): no registration form, no portal step. The route's
+  402 must carry `extensions.bazaar` (built with `declareDiscoveryExtension` from `@x402/extensions/bazaar`),
+  verify/settle must go through the CDP facilitator, and the facilitator indexes the resource **after
+  the first settled payment** whose payload echoes `extensions.bazaar` and `resource` (up to 15 min).
+  Route descriptions over 500 characters make the facilitator reject verify/settle. Resources with no
+  settlement for 30 days are removed; ranking is recomputed every 6 hours. Curation (what Coinbase
+  calls "curated catalog") additionally needs mainnet payments, 99% 30-day availability, health
+  probes and a passing validation. Shared tunnel domains are down-weighted.
+- **Preflight without paying**: `POST https://api.cdp.coinbase.com/platform/v2/x402/validate`
+  `{"resource": "<https url>", "method": "GET"|"POST"}` (no key) returns `valid`, `preflight[]`
+  (`reachable`, `returns_402`, `has_bazaar_extension`, `parse`), `bazaarExtension`, `simulation.outcome`
+  and `index`. Localhost, plain HTTP and endpoints behind an authenticating proxy are not indexed.
+- The x402.org facilitator keeps its own catalogue, which is not the CDP Bazaar. `https://agentic.market`
+  is Coinbase's public browser over the same Bazaar (the owner's "Agent.market"); no separate submission.
+  No other index needs a submission for Coinbase agents.
+
+### What the Coinbase MCP can pay for
+
+- `https://agents.coinbase.com/mcp` (OAuth with a Coinbase account; Claude Code:
+  `claude mcp add coinbase --transport http https://agents.coinbase.com/mcp`, then `/mcp` -> Authenticate).
+- `coinbase_x402_resources`: "Discover curated x402 services", free; returns URLs, input schemas,
+  advisory prices. `coinbase_x402_fetch(resource, input, max_amount)`: pays and fetches in one call,
+  "accepts curated catalog resources and x402 v2 challenges", "not an unrestricted web-fetch tool".
+  `coinbase_x402_pay`: authorizes and returns the `PAYMENT-SIGNATURE` (v2) / `X-PAYMENT` (v1) header only.
+- USDC on Base only, **5 USDC cap per payment**, `max_amount` in atomic units can only lower the
+  ceiling, settled payments are irreversible, UUID `idempotency_key` to reuse on timeouts.
+- The buyer supplies a resource URL plus flat `input`; the tool builds the HTTP request from the
+  resource's discovery schema. It does not wrap MCP JSON-RPC, so a Coinbase agent cannot call
+  `tools/call` on `/mcp`. Hence `POST /x402/scan`: a plain x402 HTTP resource with the same input,
+  limits, price and Report, declared as `bodyType: "json"` in its Bazaar block.
+- The Bazaar's `mcp` resource type is for servers that use the x402 MCP transport
+  (`_meta["x402/payment"]`, `@x402/mcp` `createPaymentWrapper`), not for an HTTP 402 on a JSON-RPC
+  endpoint, so `/mcp` is left without Bazaar metadata; it keeps its 402 challenge for x402-aware MCP clients.
+- Contradiction noted: `/x402/agentic-accounts/coinbase-for-agents` (and a search snippet of it)
+  reads as if x402 in Coinbase for Agents were "coming soon" and points to Agentic Wallet, while the
+  Coinbase MCP page documents the three tools as available. The MCP page is the more specific and is
+  followed here; the Agentic Wallet remains the fallback buyer.
+
+### Library facts (read from `@x402/hono@2.28.0`, `@x402/core@2.28.0`, `@x402/extensions@2.28.0`)
+
+- `RouteConfig` fields: `accepts`, `resource`, `description`, `mimeType`, `serviceName`, `tags`,
+  `iconUrl`, `customPaywallHtml`, `unpaidResponseBody`, `settlementFailedResponseBody`, `extensions`.
+  There is no `discoverable` flag in v2 (that was the v1 `outputSchema`/`extra` convention); v2
+  discoverability is the presence of `extensions.bazaar`.
+- `paymentMiddleware` calls `checkIfBazaarNeeded(routes)`; when any route has `extensions.bazaar` it
+  lazily imports `@x402/extensions/bazaar`, registers `bazaarResourceServerExtension` on the resource
+  server and runs `validateBazaarRouteExtensions` (warnings only). `@x402/extensions` therefore has
+  to be a direct dependency (added, 2.28.0; it was already a peer of `@coinbase/x402`).
+- `declareDiscoveryExtension({ bodyType, input, inputSchema, output: { example, schema } })` for
+  POST/PUT/PATCH puts `input` into `info.input.body` and `inputSchema` into
+  `schema.properties.input.properties.body`; the method is filled in from the request by the server
+  extension's `enrichDeclaration` at 402 time. The facilitator validates `info` against `schema` with
+  Ajv (`strict: false`), so the example body must satisfy the input schema and the example report the
+  output schema (tests assert both with the package's own `validateDiscoveryExtension`).
+- The 402 `resource.url` is `routeConfig.resource || request URL` (`HonoAdapter.getUrl()` =
+  `c.req.url`). Behind a reverse proxy that is the internal URL, so `resource` is set from `PUBLIC_URL`.
+- Declared extensions are included in the 402 regardless of the facilitator's `/supported`
+  `extensions` list, so the test mock facilitator needs no change.
+- CDP Secret API key: `https://portal.cdp.coinbase.com/api-keys/secret` -> project drop-down ->
+  "Secret API Keys" tab -> "Create API key" -> name, optional IP allowlist and permission restrictions,
+  Ed25519 recommended -> Create. Key id is a UUID, secret is base64. No x402-specific onboarding or
+  allowlisting is documented. Facilitator pricing confirmed: first 1,000 on-chain transactions per
+  month free, $0.001 each after; verification free.
+
+### Sources
+
+- x402 welcome: https://docs.cdp.coinbase.com/x402/welcome
+- Seller quickstart: https://docs.cdp.coinbase.com/x402/seller/quickstart
+- CDP facilitator (auth, networks, pricing): https://docs.cdp.coinbase.com/x402/seller/facilitator
+- Get discovered (Bazaar listing rules, validate curl, curation): https://docs.cdp.coinbase.com/x402/seller/get-discovered
+- Production configuration: https://docs.cdp.coinbase.com/x402/seller/production-configuration
+- Seller MCP payments (x402 MCP transport): https://docs.cdp.coinbase.com/x402/seller/mcp-payments
+- Buyer discovery (SDK and REST): https://docs.cdp.coinbase.com/x402/buyer/discover-services
+- Bazaar page: https://docs.cdp.coinbase.com/x402/bazaar
+- Buyer MCP payments (Bazaar MCP server): https://docs.cdp.coinbase.com/x402/buyer/mcp-payments
+- Buyer client configuration (spend limits): https://docs.cdp.coinbase.com/x402/buyer/client-configuration
+- Troubleshooting (indexing requirements, 15 min, env var names): https://docs.cdp.coinbase.com/x402/support/troubleshooting
+- Coinbase MCP (tools, caps, setup commands): https://docs.cdp.coinbase.com/ai-agents/coinbase-for-agents/coinbase-mcp
+- Coinbase for Agents skill file (fetch scope, idempotency): https://docs.cdp.coinbase.com/coinbase-for-agents/skill.md
+- Coinbase for Agents x402 overview: https://docs.cdp.coinbase.com/x402/agentic-accounts/coinbase-for-agents
+- REST: list resources https://docs.cdp.coinbase.com/api-reference/v2/rest-api/x402-facilitator/list-x402-resources
+- REST: search https://docs.cdp.coinbase.com/api-reference/v2/rest-api/x402-facilitator/search-x402-resources
+- REST: validate https://docs.cdp.coinbase.com/api-reference/v2/rest-api/x402-facilitator/validate-x402-endpoint
+- CDP API keys: https://docs.cdp.coinbase.com/get-started/authentication/cdp-api-keys
+- Bazaar extension spec: https://github.com/x402-foundation/x402/blob/main/specs/extensions/bazaar.md
+- `@x402/extensions` bazaar README: https://github.com/x402-foundation/x402/blob/main/typescript/packages/extensions/src/bazaar/README.md
+- CDP SDK Express/Hono examples (no bazaar declaration in them): https://github.com/coinbase/cdp-sdk/tree/main/examples/typescript/x402/servers
+- npm: https://www.npmjs.com/package/@x402/extensions (2.28.0, 2026-09-29)

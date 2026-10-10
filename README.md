@@ -7,6 +7,10 @@ readiness checks for Flutter, React Native and Expo apps) as a tool that AI agen
 - `POST /mcp`: MCP Streamable HTTP endpoint (stateless, JSON responses).
   - `storelint_checks` (free): the check catalogue.
   - `storelint_scan` ($0.05 per call): `{ zipBase64?: string, repoUrl?: string }` -> StoreLint Report JSON.
+- `POST /x402/scan`: the same scan as a plain x402 HTTP resource for non-MCP buyers (Coinbase for
+  Agents' `coinbase_x402_fetch`, `@x402/fetch`, curl). Body `{"repoUrl": "..."}` or `{"zipBase64": "..."}`,
+  response is the Report JSON, same price and limits. Its 402 carries Bazaar discovery metadata so the
+  CDP facilitator indexes it after the first settled payment. See `docs/COINBASE-AGENTS.md`.
 - `GET /health`: `{ "ok": true }`.
 - `GET /`: HTML page with the tool description, price and MCP URL.
 
@@ -31,7 +35,7 @@ installed, scans return a stub Report with one info finding `app.scanner-unavail
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `PORT` | `3000` | Listen port. |
-| `PUBLIC_URL` | request origin | Base URL printed on the landing page. |
+| `PUBLIC_URL` | request origin | Base URL printed on the landing page and used as the resource URL in 402 challenges (and therefore in the Bazaar index). Set it behind a reverse proxy, otherwise the internal `http://` URL is advertised. |
 | `X402_PAY_TO` | unset (free mode) | EVM address that receives USDC. |
 | `X402_PRICE` | `$0.05` | Price per `storelint_scan` call. |
 | `X402_NETWORK` | `eip155:8453` | x402 v2 network id. Base mainnet = `eip155:8453`, Base Sepolia = `eip155:84532`. |
@@ -112,6 +116,22 @@ const transport = new StreamableHTTPClientTransport(new URL("https://<host>/mcp"
 });
 ```
 
+### The plain HTTP endpoint
+
+```sh
+curl -s https://storelint-mcp.embracetech.org/x402/scan \
+  -H 'content-type: application/json' \
+  -d '{"repoUrl":"https://github.com/owner/repo"}'
+```
+
+Free mode returns the Report; paid mode returns the same 402 challenge as above plus
+`extensions.bazaar` (method `POST`, `bodyType: "json"`, input and output JSON schemas with examples).
+Bad input is answered `400 {"error": ...}` before any 402; an empty POST gets the challenge (that is
+what the CDP validator sends). Input failures after verification (clone timeout, oversize checkout)
+are `422`, which cancels settlement, so the caller is not charged for those on this route.
+
+Discovery, Coinbase agent setup and an end-to-end paid test: `docs/COINBASE-AGENTS.md`.
+
 ## Tests
 
 ```sh
@@ -119,8 +139,9 @@ pnpm test
 ```
 
 `node --test` covers: `/health` and the landing page, `storelint_checks` listing the spec's ids, `storelint_scan`
-on a tiny in-memory fixture zip (plus traversal / symlink / bad URL rejection), and the payment gate returning
-402 when `X402_PAY_TO` is set (against a local mock facilitator, no network).
+on a tiny in-memory fixture zip (plus traversal / symlink / bad URL rejection), the payment gate returning
+402 when `X402_PAY_TO` is set (against a local mock facilitator, no network), and `POST /x402/scan` in both
+modes including the Bazaar block in its 402 (validated with `@x402/extensions`' own validators).
 
 ## Deploy (Coolify)
 

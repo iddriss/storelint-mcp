@@ -25,6 +25,10 @@ describe("http basics", () => {
     assert.match(html, /\$0\.05/);
     assert.match(html, /https:\/\/example\.test\/mcp/);
     assert.match(html, /https:\/\/storelint\.embracetech\.org/);
+    // plain HTTP twin of the paid tool, and the Coinbase MCP route to pay for it
+    assert.match(html, /POST https:\/\/example\.test\/x402\/scan/);
+    assert.match(html, /coinbase_x402_fetch/);
+    assert.match(html, /agents\.coinbase\.com\/mcp/);
   });
 
   it("GET /mcp is rejected: the server is stateless", async () => {

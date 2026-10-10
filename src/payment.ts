@@ -4,10 +4,13 @@ import { HTTPFacilitatorClient, type FacilitatorConfig, type RoutesConfig } from
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { createFacilitatorConfig } from "@coinbase/x402";
 import { DEFAULT_FACILITATOR_URL, type AppConfig } from "./config.js";
+import { SCAN_HTTP_DESCRIPTION, SCAN_HTTP_PATH, scanDiscoveryExtension } from "./discovery.js";
 import { validateScanInput, type InputLimits } from "./inputs.js";
 import { SCAN_TOOL } from "./mcp.js";
+import { readScanBody } from "./scanRoute.js";
 
 const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+export const MCP_PATH = "/mcp";
 
 /**
  * True when a JSON-RPC body (single message or batch) contains a `tools/call` for the paid tool
@@ -44,12 +47,46 @@ export function buildFacilitatorConfig(cfg: AppConfig): FacilitatorConfig {
 }
 
 /**
- * Returns Hono middleware that applies the x402 payment requirement to `POST <routePath>`
- * only when the JSON-RPC body is a `tools/call` of `storelint_scan`. Returns null in free mode.
+ * Route table handed to `@x402/hono`. Both paid routes share price, network and pay-to.
+ *
+ * `resource` pins the URL advertised in the 402 (and indexed by the Bazaar) to PUBLIC_URL; without
+ * it the middleware uses the request URL, which behind a reverse proxy is the internal http:// one.
+ * Only the HTTP route declares Bazaar metadata: the Bazaar's "mcp" resource type is for the x402 MCP
+ * transport (`_meta["x402/payment"]`), not for an HTTP 402 on a JSON-RPC endpoint.
  */
-export function createPaymentGate(cfg: AppConfig, limits: InputLimits, routePath = "/mcp"): MiddlewareHandler | null {
+export function buildRoutes(cfg: AppConfig): RoutesConfig {
+  const accepts = [{ scheme: "exact", price: cfg.price, network: cfg.network as Network, payTo: cfg.payTo as string }];
+  const publicResource = (path: string) => (cfg.publicUrl ? `${cfg.publicUrl}${path}` : undefined);
+  return {
+    [`POST ${MCP_PATH}`]: {
+      accepts,
+      resource: publicResource(MCP_PATH),
+      description: `StoreLint scan (MCP tool ${SCAN_TOOL})`,
+      mimeType: "application/json",
+    },
+    [`POST ${SCAN_HTTP_PATH}`]: {
+      accepts,
+      resource: publicResource(SCAN_HTTP_PATH),
+      description: SCAN_HTTP_DESCRIPTION,
+      mimeType: "application/json",
+      extensions: scanDiscoveryExtension(),
+    },
+  };
+}
+
+export interface PaymentGates {
+  /** For `POST /mcp`: charges only `tools/call` of `storelint_scan` with valid arguments. */
+  mcp: MiddlewareHandler;
+  /** For `POST /x402/scan`: charges valid bodies; answers bad input with 4xx before any 402. */
+  scan: MiddlewareHandler;
+}
+
+/**
+ * Builds the x402 payment gates for both paid routes. Returns null in free mode (no X402_PAY_TO).
+ */
+export function createPaymentGates(cfg: AppConfig, limits: InputLimits, maxBodyBytes: number): PaymentGates | null {
   if (!cfg.payTo) {
-    console.warn(`[storelint-mcp] X402_PAY_TO is not set: running in FREE mode, ${SCAN_TOOL} is not payment-gated.`);
+    console.warn(`[storelint-mcp] X402_PAY_TO is not set: running in FREE mode, ${SCAN_TOOL} and POST ${SCAN_HTTP_PATH} are not payment-gated.`);
     return null;
   }
   if (!EVM_ADDRESS_RE.test(cfg.payTo)) {
@@ -61,27 +98,29 @@ export function createPaymentGate(cfg: AppConfig, limits: InputLimits, routePath
 
   const facilitator = new HTTPFacilitatorClient(buildFacilitatorConfig(cfg));
   const resourceServer = new x402ResourceServer(facilitator).register(cfg.network as Network, new ExactEvmScheme());
-  const routes: RoutesConfig = {
-    [`POST ${routePath}`]: {
-      accepts: [{ scheme: "exact", price: cfg.price, network: cfg.network as Network, payTo: cfg.payTo }],
-      description: `StoreLint scan (MCP tool ${SCAN_TOOL})`,
-      mimeType: "application/json",
-    },
-  };
-  const x402 = paymentMiddleware(routes, resourceServer);
+  const x402 = paymentMiddleware(buildRoutes(cfg), resourceServer);
 
   console.log(
-    `[storelint-mcp] x402 enabled: ${cfg.price} per ${SCAN_TOOL} call on ${cfg.network}, payTo ${cfg.payTo}, facilitator ${cfg.facilitatorUrl}`,
+    `[storelint-mcp] x402 enabled: ${cfg.price} per ${SCAN_TOOL} call (POST ${MCP_PATH}, POST ${SCAN_HTTP_PATH}) on ${cfg.network}, payTo ${cfg.payTo}, facilitator ${cfg.facilitatorUrl}` +
+      (cfg.publicUrl ? `, resource base ${cfg.publicUrl}` : ", PUBLIC_URL unset: 402 advertises the request URL"),
   );
 
-  return async (c, next) => {
-    let body: unknown;
-    try {
-      body = await c.req.raw.clone().json();
-    } catch {
-      return next(); // not JSON: let the MCP transport produce the proper error
-    }
-    if (!(await isPaidToolCall(body, limits))) return next();
-    return x402(c, next);
+  return {
+    mcp: async (c, next) => {
+      let body: unknown;
+      try {
+        body = await c.req.raw.clone().json();
+      } catch {
+        return next(); // not JSON: let the MCP transport produce the proper error
+      }
+      if (!(await isPaidToolCall(body, limits))) return next();
+      return x402(c, next);
+    },
+    scan: async (c, next) => {
+      const parsed = await readScanBody(c.req.raw.clone(), limits, maxBodyBytes);
+      if (parsed.kind === "invalid") return c.json({ error: parsed.error }, parsed.status);
+      // valid input, or an empty probe that only wants the challenge
+      return x402(c, next);
+    },
   };
 }
