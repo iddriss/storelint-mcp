@@ -1,0 +1,10 @@
+node_modules
+dist
+.pnpm-store
+.git
+.env
+.env.*
+*.log
+docs
+README.md
+.DS_Store
