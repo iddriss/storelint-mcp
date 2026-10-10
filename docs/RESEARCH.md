@@ -124,9 +124,19 @@ discovery endpoints below are documented as unauthenticated but were not called.
   resource's discovery schema. It does not wrap MCP JSON-RPC, so a Coinbase agent cannot call
   `tools/call` on `/mcp`. Hence `POST /x402/scan`: a plain x402 HTTP resource with the same input,
   limits, price and Report, declared as `bodyType: "json"` in its Bazaar block.
-- The Bazaar's `mcp` resource type is for servers that use the x402 MCP transport
-  (`_meta["x402/payment"]`, `@x402/mcp` `createPaymentWrapper`), not for an HTTP 402 on a JSON-RPC
-  endpoint, so `/mcp` is left without Bazaar metadata; it keeps its 402 challenge for x402-aware MCP clients.
+- The Bazaar's `mcp` resource type (spec: `info.input.type: "mcp"`, `toolName`, `inputSchema`, optional
+  `transport` `streamable-http`|`sse`, catalogued by `(resource.url, toolName)`) describes a paid MCP tool
+  regardless of whether the 402 travels as an HTTP status or as the MCP transport's `_meta["x402/payment"]`.
+  Since 2026-10-10 `/mcp` declares it too (`mcpDiscoveryExtension()` in `src/discovery.ts`), so the tool
+  can be listed as `type: mcp` once a payment settles. Open question (README, "Get discovered"): the CDP
+  validate endpoint probes with an empty or example body and its required preflight checks include
+  `bazaar.info.input.method` (seen 2026-10-10), so `/mcp` is expected to fail the validator while still
+  being indexable through a settled payment that echoes the block.
+- Library quirk (`@x402/extensions@2.28.0`): `validateBazaarRouteExtensions` runs `withSyntheticMethod`, which
+  adds `method` to the mcp-type info before validating it against a schema with `additionalProperties: false`,
+  so startup logs `x402: Route "POST /mcp" has an invalid bazaar extension: /input: must NOT have additional
+  properties`. Warning only; `enrichDeclaration` returns mcp declarations unchanged and the served block passes
+  `validateDiscoveryExtension` and `validateDiscoveryExtensionSpec`.
 - Contradiction noted: `/x402/agentic-accounts/coinbase-for-agents` (and a search snippet of it)
   reads as if x402 in Coinbase for Agents were "coming soon" and points to Agentic Wallet, while the
   Coinbase MCP page documents the three tools as available. The MCP page is the more specific and is

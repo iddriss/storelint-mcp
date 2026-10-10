@@ -77,8 +77,9 @@ for (const resource of resources) {
     console.log(`   simulation: ${simulation.outcome}${simulation.rejectionReason ? ` (${simulation.rejectionReason})` : ""}`);
   }
   if (paymentRequirements) {
-    const accepts = paymentRequirements.accepts ?? [paymentRequirements];
-    for (const a of accepts) {
+    // v2: { resource, accepts: [...] }; v1: a single requirements object
+    const accepts = Array.isArray(paymentRequirements.accepts) ? paymentRequirements.accepts : [paymentRequirements];
+    for (const a of accepts.filter((x) => x && x.scheme)) {
       console.log(`   accepts: ${a.scheme} ${a.network} amount=${a.amount ?? a.maxAmountRequired} payTo=${a.payTo}`);
     }
     const r = paymentRequirements.resource;

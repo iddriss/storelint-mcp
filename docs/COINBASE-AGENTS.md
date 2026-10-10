@@ -12,12 +12,13 @@ is marked **VERIFY:**. Nothing here was executed with real keys, wallets or fund
 
 | Route | Who it is for | Payment |
 | --- | --- | --- |
-| `POST /mcp` | MCP clients (Claude Code, Cursor, `@x402/fetch`-wrapped transports). Tool `storelint_scan`. | x402, $0.05 USDC on Base, only for `tools/call` of `storelint_scan`. |
+| `POST /mcp` | MCP clients (Claude Code, Cursor, `@x402/fetch`-wrapped transports). Tool `storelint_scan`. | x402, $0.05 USDC on Base, only for `tools/call` of `storelint_scan`. Its 402 carries Bazaar discovery metadata of type `mcp` (`toolName`, the tool's arguments schema, Report output schema and example). |
 | `POST /x402/scan` | Plain-HTTP x402 buyers: Coinbase for Agents (`coinbase_x402_fetch`), `@x402/fetch`, curl. Body `{"repoUrl": "..."}` or `{"zipBase64": "..."}`; response is the Report JSON. | Same x402 gate, same price. Its 402 carries Bazaar discovery metadata (`extensions.bazaar`: method, JSON body schema, output schema and example). |
 
 Why the HTTP route exists: `coinbase_x402_fetch` takes a resource URL plus flat `input` and performs
 the HTTP request itself from the resource's discovery schema. It does not speak MCP JSON-RPC, so the
-MCP endpoint alone is not something a Coinbase agent can pay for. `/mcp` is unchanged.
+MCP endpoint alone is not something a Coinbase agent can pay for. `/mcp` keeps its gate as it was; it
+additionally advertises itself to the Bazaar as an `mcp`-type resource so MCP-capable buyers can find the tool.
 
 ## (a) Owner setup
 
@@ -75,7 +76,9 @@ Redeploy. The startup log must show:
 ```
 
 and must not show `CDP_API_KEY_ID / CDP_API_KEY_SECRET are not set` or
-`Failed to load bazaar extension`.
+`Failed to load bazaar extension`. The line `x402: Route "POST /mcp" has an invalid bazaar extension:
+/input: must NOT have additional properties` is expected: a warning-only quirk of
+`@x402/extensions@2.28.0`'s startup validator with mcp-type declarations (see README, "Get discovered").
 
 ### 4. Check the challenge yourself (no payment involved)
 
@@ -102,6 +105,15 @@ curl -s -X POST https://api.cdp.coinbase.com/platform/v2/x402/validate \
   -H 'content-type: application/json' \
   -d '{"resource":"https://storelint-mcp.embracetech.org/x402/scan","method":"POST"}' | jq .
 ```
+
+`node scripts/validate-listing.mjs` runs the same call for `/mcp` and `/x402/scan` and prints the checks,
+`simulation`, the served `bazaarExtension`, `index.quality` and the discovery-search result.
+
+**VERIFY (mcp-type resource):** for `/mcp` the validator POSTs an empty or example body, which is not a
+`tools/call`, so the MCP transport answers (406/400) instead of the gate's 402, and its required checks
+include `bazaar.info.input.method`, which an `mcp`-type block does not carry. Expect `/mcp` to fail the
+validator while `/x402/scan` passes. The validator is read-only; indexing is triggered by a settled
+payment whose payload echoes `extensions.bazaar`, which x402-aware MCP clients do send.
 
 Expected: `valid: true`, every `preflight[]` entry (`reachable`, `returns_402`,
 `has_bazaar_extension`, `parse`) `passed: true`, `simulation.outcome: "accepted"`, and
